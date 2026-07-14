@@ -9,6 +9,8 @@ import numpy as np
 from scipy.integrate import solve_bvp
 import matplotlib.pyplot as plt
 
+# ------------ Units and constants --------------------------------------
+
 #system of units (relative to CGS): 
 # user specified units
 unit_length = 1.e8 # cm
@@ -33,41 +35,58 @@ unit_heat = unit_pressure/unit_time
 unit_magneticfield = (mu_0*unit_pressure)**0.5
 
 
+# ------------ User input --------------------------------------
 
-
-L = 10.0e9 /unit_length #10.0e9/unit_length # loop length (bottom to top) in cm
+L = 10.0e9 /unit_length #10.0e9/unit_length # half-length of the loop (i.e. bottom to top) in cm
 
 g_0 = 2.74e4 *unit_length/unit_velocity**2   # cm/s^2
-kappa = 1.7e-6 *unit_temperature**3.5/unit_length/unit_density/unit_velocity**3
-#E_0 = 2e-3 /unit_pressure*unit_time # erg/cm**3/s
-#s_H = 3.5e9 / unit_length 
+kappa = 1.7e-6 *unit_temperature**3.5/unit_length/unit_density/unit_velocity**3  # Spitzer conductivity in cgs 
+
+# rad. losses approximated as E_R = chi * T^alpha
 alpha = -0.5
-chi = 10**(-18.8) / unit_pressure*unit_numberdensity**2 * unit_time*unit_temperature**alpha * (1+2*He_abundance) # cgs # last factor from Hermans&Keppens21
+chi = 10**(-18.8) / unit_pressure*unit_numberdensity**2 * unit_time*unit_temperature**alpha * (1+2*He_abundance) # cgs; last factor from Hermans&Keppens21
 
-r_0 = 1.e8/unit_length   # cm
-zeta_0 = 5
-B_0 = 20./unit_magneticfield # G  default:20
-f = 0.1
+r_0 = 1.e8/unit_length      # loop radius at the footpoint in cm
+zeta_0 = 5                  # density contrast at the footpoint           
+B_0 = 20./unit_magneticfield # magnetic field at the footpoint in G
+f = 0.1                     # filling factor
 
-# Default input
+# Main part of the input
 
-P_0 = 0.0659e0 / unit_pressure #0.1580e0 / unit_pressure   # dyn/cm^2  # initial guess:1
-T_0 = 2e4 / unit_temperature #2e4 / unit_temperature #0.95e4 / unit_temperature
+# footpoint pressure in dyn/cm^2
+P_0 = 0.0659e0 / unit_pressure
+
+# footpoint temperature in K corresponding to the top of the chromosphere
+# shouldn't be changed (much) to keep the physical assumptions behind the model valid
+T_0 = 2e4 / unit_temperature 
+
+# initial guess for max. temperature (at the loop apex)
+# should be set higher than the anticipated value
 T_max = 3e6 / unit_temperature  # initial guess
-# W_k = 1.67e-2 / unit_pressure  # erg/cm^3 = 0.1 J/m^3
+
+# initial guess for kink wave energy density at the footpoint (at the loop apex)
+# should be set much higher than the anticipated value
 W_k_0 = 1.67e2 / unit_pressure  # erg/cm^3 = 0.1 J/m^3
 
-# High-temp input
+# Example of a high-temp input
 
 # P_0 = 0.5e1 / unit_pressure   # dyn/cm^2  # initial guess:1
 # T_0 = 2e4 / unit_temperature
 # T_max = 5e6 / unit_temperature  # initial guess
-# # W_k = 1.67e-2 / unit_pressure  # erg/cm^3 = 0.1 J/m^3
 # W_k_0 = 8e2 / unit_pressure  # erg/cm^3 = 0.1 J/m^3
 
-n_points = 100
+
+# footpoint distance from the photosphere in cm
 s_left = 1e8/unit_length # 2.104e8/unit_length
 
+# initial number of gridpoints; the code will refine the grid automatically if necessary
+n_points = 100
+
+# maximum allowed number of gridpoints
+n_points_max = 100000
+
+
+# ------------ Solver --------------------------------------
 
 #%% In terms of variables Q = ln(P/P_0), eta = T**7/2 and W = 1/sqrt(WW), where WW = alpha_kink * B * W_k
 # extra equation for W_k for both directions
@@ -191,8 +210,11 @@ def boundary_conditions(left, right, param):
     W_0 = param[1]
     return np.array([left[0], left[1]-T_0**3.5, right[1]-T_max**3.5, left[2], right[2], left[3]-W_0, right[3]-right[4]])
 
-solution = solve_bvp(equations, boundary_conditions, s, y, p=[T_max, W_0], max_nodes=1000000, verbose=2)
+# actual solver
+solution = solve_bvp(equations, boundary_conditions, s, y, p=[T_max, W_0], max_nodes=n_points_max, verbose=2)
 
+
+# control printouts
 print('T_max [MK] = ', solution.p[0])
 print('W_0 = ', solution.p[1])
 # print('E_0 [erg cm**-3 s**-1] = ', solution.p[1]*unit_pressure/unit_time)
@@ -205,6 +227,9 @@ W = solution.y[3]
 W_plus = solution.y[4]
 s = solution.x
 
+# ------------ Plotting --------------------------------------
+
+# Calculating the relevant quantities derived from the solution
 B = B_0 * pow(1.+ 2*L/np.pi * np.sin(np.pi*(s-s_left)/(2*L)) / R_sun,-2)
 zeta = (zeta_0-1)*np.exp(-2*L/np.pi * np.sin(np.pi*(s-s_left)/(2*L)) /R_sun/5)+1
 r = np.sqrt(B_0/B)*r_0
@@ -224,8 +249,12 @@ E_total = E_H[2:len(s)-2] + thermal_conduction - rad_loss[2:len(s)-2]
 average_W_k = ((W_k*unit_pressure)**1.5 + (W_k_plus*unit_pressure)**1.5)**(2./3)
 density = P_0 * np.exp(Q) / (eta**(2./7)) * unit_density
 
+# User input: specify variables to plot
+
 var_to_plot = [np.exp(Q), np.exp(Q)*P_0*unit_pressure, eta**(2./7), diffeta, W, W_plus, W_k*unit_pressure, W_k_plus*unit_pressure, W_k*unit_pressure + W_k_plus*unit_pressure, average_W_k, E_H*unit_pressure/unit_time, np.log10(density)]
-title_to_plot = ["$P/P_0$", "$P$ [dyn/cm$^2$]", "$T$ [MK]", "$\\eta'$", "$W$", "$W^+$", "$W_k$ [erg/cm$^3$]", "$W_k^+$ [erg/cm$^3$]", "total $W_k$ [erg/cm$^3$]", 'average $W_k$ [erg/cm$^3$]', '$E_H$ [erg/cm$^3/s$]', '$\\rho$ [g/cm$^3$]']
+title_to_plot = ["$P/P_0$", "$P$ [dyn/cm$^2$]", "$T$ [MK]", "$\\eta'$", "$W$", "$W^+$", "$W_k$ [erg/cm$^3$]", "$W_k^+$ [erg/cm$^3$]", "total $W_k$ [erg/cm$^3$]", 'average $W_k$ [erg/cm$^3$]', '$E_H$ [erg/cm$^3/s$]', '$\\log(\\rho$ [g/cm$^3$])']
+
+# Actual plotting
 
 for i in range(len(var_to_plot)):
     plt.plot(s, var_to_plot[i])
@@ -233,6 +262,8 @@ for i in range(len(var_to_plot)):
     plt.xlim(s_left, L+s_left)
     plt.title(title_to_plot[i])
     plt.show()
+
+# Additional plots
 
 plt.plot(s, rad_loss * unit_pressure/unit_time)
 plt.plot(s, E_H * unit_pressure/unit_time)
@@ -259,6 +290,10 @@ plt.ylim(np.min(W_k_whole_loop[plotting_indices]*unit_pressure), np.max(W_k_whol
 plt.title("$W_k$ [erg/cm$^3$]")
 plt.show()
 
+
+# ------------ Saving the data --------------------------------------
+
+
 #data_file = './P10_L50Mm_Wkwhole.txt'
 #np.savetxt(data_file, np.column_stack((s_whole_loop, W_k_whole_loop*unit_pressure)), header='s W_k_whole_loop')
 
@@ -277,3 +312,8 @@ plt.show()
 
 #data_file = './Haruka/T9500_zeta05_f010.txt'
 #np.savetxt(data_file, np.column_stack((s, eta**(2./7), np.exp(Q)*P_0*unit_pressure, P_k*unit_pressure, W_k*unit_pressure, W_k_plus*unit_pressure, E_H*unit_pressure/unit_time)), header='s[Mm] T[MK] P[dyn/cm^2] P_k[dyn/cm^2] W_k^-[erg/cm^3] W_k^+[erg/cm^3] E_H[erg/cm^3/s]')
+
+#%% Saving data for Max
+
+data_file = './Max/T8000_2L107_test.txt'
+np.savetxt(data_file, np.column_stack((s, eta**(2./7), density, np.exp(Q)*P_0*unit_pressure, P_k*unit_pressure, W_k*unit_pressure, W_k_plus*unit_pressure, E_H*unit_pressure/unit_time)), header='s[Mm] T[MK] rho[g/cm^3] P[dyn/cm^2] P_k[dyn/cm^2] W_k^-[erg/cm^3] W_k^+[erg/cm^3] E_H[erg/cm^3/s]')
